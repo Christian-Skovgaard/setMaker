@@ -1,0 +1,7 @@
+.gitignore
+docs/proposal.odt
+.~lock.proposal.odt#
+dump/
+.env
+__pycache__/
+.venv/

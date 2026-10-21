@@ -1,0 +1,35 @@
+services:
+  rawDataStore:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: secret
+      POSTGRES_DB: appdb
+    ports:
+    - "5432:5432"
+    volumes:
+      - raw_data:/var/lib/postgresql/data
+      - ./rawDataStore/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d appdb"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+
+  ingest:
+    build:
+      context: ./ingest
+      dockerfile: dockerfile
+      no_cache: true #else the gitrepo does not update
+    environment:
+      DB_HOST: rawDataStore
+      DB_PORT: 5432
+      DB_NAME: appdb
+      DB_USER: app
+      DB_PASSWORD: secret
+    depends_on:
+        rawDataStore:
+          condition: service_healthy
+
+volumes:
+  raw_data:
