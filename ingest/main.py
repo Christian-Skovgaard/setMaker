@@ -18,8 +18,6 @@ recordingsJSON = json.loads(Path(theSessionDataParthString,"json","recordings.js
 tunesJSON = json.loads(Path(theSessionDataParthString,"json","tunes.json").read_text(encoding="utf-8"))
 setsJSON = json.loads(Path(theSessionDataParthString,"json","sets.json").read_text(encoding="utf-8"))
 
-print(recordingsJSON[5])
-
 
 DB_CONFIG = { #make secret 🤫
     "host": os.getenv("DB_HOST", "localhost"),
@@ -108,7 +106,9 @@ with psycopg.connect(**DB_CONFIG) as conn:
             ) for v in setsJSON
         ]
         cur.executemany(
-            "INSERT INTO raw.tune_sets (tuneset, settingorder, date, member_id, username, name, tune_id, setting_id, type, meter, mode, abc, snapshot_id)"
+            "INSERT INTO raw.sets (tuneset, settingorder, date, member_id, username, name, tune_id, setting_id, type, meter, mode, abc, snapshot_id)"
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
             setsVList,
         )
+
+print("data ingestion complete!")

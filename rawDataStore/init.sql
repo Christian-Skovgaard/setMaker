@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS tunes (
 );
 
 --sets
-CREATE TABLE IF NOT EXISTS tune_sets (
+CREATE TABLE IF NOT EXISTS raw.sets (
     tuneset       INTEGER NOT NULL,
     settingorder  INTEGER NOT NULL,
     date          TIMESTAMP,
