@@ -5,3 +5,8 @@ dump/
 .env
 __pycache__/
 .venv/
+.vscode
+notes.md
+prefectTest
+.vscode
+TheSession-data

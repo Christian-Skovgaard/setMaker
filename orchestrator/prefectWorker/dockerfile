@@ -1,0 +1,3 @@
+FROM prefecthq/prefect:3.9-python3.13
+RUN pip install --no-cache-dir prefect-docker
+CMD ["prefect", "worker", "start", "--pool", "docker-pool", "--type", "docker"]

@@ -1,9 +1,13 @@
+name: setmaker
+
 services:
+
+  # db's
   rawDataStore:
     image: postgres:16
     environment:
-      POSTGRES_USER: app
-      POSTGRES_PASSWORD: secret
+      POSTGRES_USER: ${POSTGRES_USER:-setMaker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-1234}
       POSTGRES_DB: appdb
     ports:
     - "5432:5432"
@@ -11,25 +15,144 @@ services:
       - raw_data:/var/lib/postgresql/data
       - ./rawDataStore/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d appdb"]
+      test: ["CMD-SHELL", "pg_isready -U setMaker -d appdb"]
       interval: 2s
       timeout: 5s
       retries: 15
+
+  featureStore:
+    image: chrislusf/seaweedfs
+    entrypoint: /bin/sh -c
+    command: |
+      "mkdir -p /etc/seaweedfs && echo '{
+        \"identities\": [
+          {
+            \"name\": \"setmaker\",
+            \"credentials\": [
+              { \"accessKey\": \"${S3_ACCESS_KEY:-setMaker}\", \"secretKey\": \"${S3_SECRET_KEY:-1234}\" }
+            ],
+            \"actions\": [\"Admin\", \"Read\", \"List\", \"Tagging\", \"Write\"]
+          }
+        ]
+      }' > /etc/seaweedfs/s3.json &&
+      weed server -dir=/data -s3 -s3.config=/etc/seaweedfs/s3.json -master.volumeSizeLimitMB=1024"
+    ports:
+      - "8333:8333"   # S3 API
+      - "8888:8888"   # filer UI
+      - "9333:9333"   # master UI
+    volumes:
+      - feature_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/healthz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 15s
+    restart: unless-stopped
+
+  # ochestration and pipelines
+  prefectServer:
+    build: ./orchestrator/prefectServer
+    pull_policy: build #else it tries to pull from dockerhub first
+    image: setmaker-orchestrator:latest
+    environment:
+      PREFECT_API_URL: ${PREFECT_API_URL:-http://prefectServer:4200/api}
+      PREFECT_UI_API_URL: ${PREFECT_UI_API_URL:-http://localhost:4200/api}
+    ports: 
+      - "4200:4200"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:4200/api/health', timeout=3)"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+  
+  prefectWorker: #sits as a layer between prefect and containers, acting as a form of socket, is intended for horizontal scalebility, but here we only use one because we need it to manage starting and stopping containers in oder
+    build: ./orchestrator/prefectWorker
+    pull_policy: build #else it tries to pull from dockerhub first
+    image: setmaker-prefect-worker:latest
+    command: prefect worker start --pool docker-pool --type docker
+    environment:
+      PREFECT_API_URL: ${PREFECT_API_URL:-http://prefectServer:4200/api}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock # bind mount - points to a file already there, does not need it's own in opposed to named volumes
+    depends_on:
+      prefectServer:
+        condition: service_healthy
+    restart: unless-stopped
+
+  deployIngest:
+    image: setmaker-ingest:latest
+    command: python deploy.py
+    environment:
+      DB_HOST: rawDataStore
+      DB_PORT: 5432
+      DB_NAME: appdb
+      DB_USER: ${POSTGRES_USER:-setMaker}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-1234}
+      SESSIONDATAPARTH: /app/TheSession-data/
+      PREFECT_API_URL: http://prefectServer:4200/api
+    restart: "on-failure:5"
+    depends_on:
+      prefectServer: {condition: service_healthy}
+      prefectWorker: { condition: service_started }
+
+  deployWeeklyFlow:
+    build: ./orchestrator/deployment
+    pull_policy: build
+    image: setmaker-weekly:latest
+    command: python weekly.py
+    environment:
+      PREFECT_API_URL: http://prefectServer:4200/api
+    depends_on:
+      prefectServer: {condition: service_healthy}
+      prefectWorker: {condition: service_started}
+    restart: "on-failure:5"
+
 
   ingest:
     build:
       context: ./ingest
       dockerfile: dockerfile
       no_cache: true #else the gitrepo does not update
+    image: setmaker-ingest:latest #needs image name so prefect can find
+    pull_policy: build #else it tries to pull from dockerhub first
+    profiles: ["jobs"] #starts with the profile, not "docker compose up"
     environment:
       DB_HOST: rawDataStore
       DB_PORT: 5432
       DB_NAME: appdb
-      DB_USER: app
-      DB_PASSWORD: secret
+      DB_USER: ${POSTGRES_USER:-setMaker}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-1234}
+      SESSIONDATAPARTH: /app/TheSession-data/
+      PREFECT_API_URL: ${PREFECT_API_URL:-http://prefectServer:4200/api}
     depends_on:
         rawDataStore:
           condition: service_healthy
+    
+    
+# util
+  createBuckets: #we have a seperate service to create the bucket because it is difficult to bake it into featurestore service, and am not 100% sure which service would use it first.
+    image: amazon/aws-cli
+    environment:
+      AWS_ACCESS_KEY_ID: ${S3_ACCESS_KEY:-setMaker}
+      AWS_SECRET_ACCESS_KEY: ${S3_SECRET_KEY:-1234}
+      AWS_DEFAULT_REGION: us-east-1
+    entrypoint: /bin/sh -c
+    command: |
+      "aws configure set default.s3.addressing_style path &&
+       for b in mlflow features; do
+         aws --endpoint-url http://featureStore:8333 s3 mb s3://$$b || true;
+       done"
+    depends_on:
+      featureStore:
+        condition: service_healthy
+    restart: "no"
+
+  
+
+  
 
 volumes:
   raw_data:
+  feature_data:
