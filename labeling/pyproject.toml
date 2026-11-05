@@ -8,8 +8,11 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "boto3>=1.43.123",
     "dotenv>=0.9.9",
+    "pandas>=3.1.0",
     "psycopg[binary]>=3.3.6",
+    "pyarrow>=26.0.0",
 ]
 
 [project.scripts]
