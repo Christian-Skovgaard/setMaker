@@ -1,5 +1,6 @@
 .gitignore
 docs/proposal.odt
+docs/ms2.odt
 .~lock.proposal.odt#
 dump/
 .env
